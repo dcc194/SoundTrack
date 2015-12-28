@@ -16,9 +16,11 @@ class StoppableThread(threading.Thread):
     """Thread class with a stop() method. The thread itself has to check
     regularly for the stopped() condition."""
 
-    def __init__(self, target=None,  **kwargs):
-        super(StoppableThread, self, target=None,  **kwargs).__init__()
+    def __init__(self, target, freq, stream, *args, **kwargs):
+        super(StoppableThread, self, target, *args, **kwargs).__init__()
         self._stop = threading.Event()
+        self.freq = freq
+        self.stream - stream
 
     def stop(self):
         self._stop.set()
@@ -29,7 +31,7 @@ class StoppableThread(threading.Thread):
     def run(self):
         while not self.stopped():
             if self.target:
-                self.target()
+                self.target(self.stream,self.freq)
             else:
                 raise Exception('No target function given')
             self.stop_event.wait(self.sleep_time)
@@ -195,7 +197,7 @@ while(True):
                 th.stop()
 
             #t = StoppableThread()
-            t = StoppableThread(target=startContinuousTone, args=(stream,locToFreq(x,np.size(frame[:,:,0],0))))
+            t = StoppableThread(target=startContinuousTone, freq=locToFreq(x,np.size(frame[:,:,0],0)),stream=stream)
             # t.run(stream,locToFreq(x,np.size(frame[:,:,0],0)))
             # t = StoppableThread()
             # t = threading.Thread(target=play_tone, args=(stream,locToFreq(x,np.size(frame[:,:,0],0)),0.3))
