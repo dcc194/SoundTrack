@@ -17,10 +17,11 @@ class StoppableThread(threading.Thread):
     regularly for the stopped() condition."""
 
     def __init__(self, target, freq, stream, *args, **kwargs):
-        super(StoppableThread, self, target, *args, **kwargs).__init__()
+        super(StoppableThread, self).__init__()
+        self.target = target
         self._stop = threading.Event()
         self.freq = freq
-        self.stream - stream
+        self.stream = stream
 
     def stop(self):
         self._stop.set()
@@ -28,25 +29,32 @@ class StoppableThread(threading.Thread):
     def stopped(self):
         return self._stop.isSet()
 
+    def updateFreq(self,freq):
+        self.freq = freq
+
     def run(self):
         while not self.stopped():
             if self.target:
-                self.target(self.stream,self.freq)
-            else:
-                raise Exception('No target function given')
-            self.stop_event.wait(self.sleep_time)
+                self.target(self,self.stream,self.freq)
+        #    else:
+        #        raise Exception('No target function given')
+            #self.stop().wait(1)
+            #self.stop_event.wait(self.sleep_time)
 
 def startContinuousTone(self,stream,freq):
-    play_tone(stream,freq,0.1)
-    if self.stopped():
-        cont = False
+    play_tone(stream,freq,0.075)
+    #if self.stopped():
+    #    cont = False
 
 def sine(frequency, length, rate):
     length = int(length * rate)
     # add a volume in here, fast ramp up (to get rid of clicks)
-
+    rampUp = np.linspace(0.0,1.0,int(math.floor(length/2.0)))
+    rampDown = np.linspace(1.0,0.0,length - int(math.floor(length/2.0)))
+    #volControl = np.concatenate(rampUp,rampDown)
+    volControl = np.hstack((rampUp,rampDown))
     factor = float(frequency) * (math.pi * 2) / rate
-    return np.sin(np.arange(length) * factor)
+    return np.multiply(np.sin(np.arange(length) * factor),volControl)
 
 
 def play_tone(stream, frequency=440, length=1, rate=44100):
@@ -54,6 +62,7 @@ def play_tone(stream, frequency=440, length=1, rate=44100):
     chunks.append(sine(frequency, length, rate))
 
     chunk = np.concatenate(chunks) * 0.25
+
 
     stream.write(chunk.astype(np.float32).tostring())
 
@@ -81,18 +90,27 @@ def locToFreq(x,imWidth):
 
 cap = cv2.VideoCapture(0)
 
-p = pyaudio.PyAudio()
-stream = p.open(format=pyaudio.paFloat32,channels=1, rate=44100, output=1)
+p1 = pyaudio.PyAudio()
+stream1 = p1.open(format=pyaudio.paFloat32,channels=1, rate=44100, output=1)
+
+p2 = pyaudio.PyAudio()
+stream2 = p2.open(format=pyaudio.paFloat32,channels=1, rate=44100, output=1)
+
+p3 = pyaudio.PyAudio()
+stream3 = p3.open(format=pyaudio.paFloat32,channels=1, rate=44100, output=1)
 
 bg = None
 bgSet = False
 hist = 80
 cnt = 0.0
-threads = []
+t1 = None
+t2 = None
+t3 = None
 pts = []
 x = -1
 y = -1
 scale = 0.6
+
 while(True):
     # Capture frame-by-frame
     ret, frame1 = cap.read()
@@ -126,8 +144,15 @@ while(True):
 
     frameDisplay = frame1
     #if x > -1:
+    idx = 0
     for pt in pts:
-        cv2.circle(frameDisplay,(int(pt[0] * 1/scale),int(pt[1] * 1/scale)),10,(0,0,255),-1)
+        if idx == 0:
+            cv2.circle(frameDisplay,(int(pt[0] * 1/scale),int(pt[1] * 1/scale)),10,(0,0,255),-1)
+        elif idx == 1:
+            cv2.circle(frameDisplay,(int(pt[0] * 1/scale),int(pt[1] * 1/scale)),10,(0,255,0),-1)
+        else:
+            cv2.circle(frameDisplay,(int(pt[0] * 1/scale),int(pt[1] * 1/scale)),10,(255,0,0),-1)
+
 
     # Display the resulting frame
     cv2.imshow('frame',frameDisplay)
@@ -157,13 +182,13 @@ while(True):
         high_values_indicesG = diff[:,:,1] > 20.0  # Where values are high
         high_values_indicesB = diff[:,:,2] > 20.0  # Where values are high
         # array_np[low_values_indices] = 0  # All low values set to 0
-        bgThresh = np.zeros((np.size(frame[:,:,0],0),np.size(frame[:,:,0],1)))
+        bgThresh = np.zeros((np.size(frame[:,:,0],0),np.size(frame[:,:,0], 1)))
         bgThresh[high_values_indicesR] = 1
         bgThresh[high_values_indicesG] = 1
         bgThresh[high_values_indicesB] = 1
         # bgThresh = skimage.morphology.binary_closing(bgThresh,rectangle(15,15))
-        bgThresh = skimage.morphology.binary_opening(bgThresh,rectangle(30,30))
-        lblImg = skimage.measure.label(bgThresh,connectivity=2)
+        bgThresh = skimage.morphology.binary_opening(bgThresh,rectangle(30, 30))
+        lblImg = skimage.measure.label(bgThresh, connectivity=2)
 
         bgCC = skimage.morphology.remove_small_objects(lblImg,150,1,False)
 
@@ -175,54 +200,73 @@ while(True):
         regions = skimage.measure.regionprops(bgCC)
 
         largest = 0
-        savedReg = None
-        foundReg = False
+        savedReg1 = None
+        savedReg2 = None
+        savedReg3 = None
 
-        cv2.imshow('diff',mask)
+        foundReg1 = False
+        foundReg2 = False
+        foundReg3 = False
+
+        cv2.imshow('diff', mask)
         pts = []
         for props in regions:
             if props.area > largest:
+                if foundReg2:
+                    savedReg3 = savedReg2
+                    foundReg3 = True
+
+                if foundReg1:
+                    savedReg2 = savedReg1
+                    foundReg2 = True
+
                 largest = props.area
-                savedReg = props
-                foundReg = True
+                savedReg1 = props
+                foundReg1 = True
                 #print 'found Largest Region'
 
 
-        if foundReg:
-            y,x = savedReg.centroid
+        if foundReg1:
+            y,x = savedReg1.centroid
             pts.append((x,y))
 
+            if t1 is not None:
+                t1.updateFreq(locToFreq(x, np.size(frame[:, :, 0], 0)))
+            else:
+                t1 = StoppableThread(target=startContinuousTone, freq=locToFreq(x, np.size(frame[:, :, 0], 0)), stream=stream1)
+                t1.start()
+        else:
+            if t1 is not None:
+                t1.stop()
+                t1 = None
 
-            for th in threads:
-                th.stop()
+        if foundReg2:
+            y,x = savedReg2.centroid
+            pts.append((x,y))
 
-            #t = StoppableThread()
-            t = StoppableThread(target=startContinuousTone, freq=locToFreq(x,np.size(frame[:,:,0],0)),stream=stream)
-            # t.run(stream,locToFreq(x,np.size(frame[:,:,0],0)))
-            # t = StoppableThread()
-            # t = threading.Thread(target=play_tone, args=(stream,locToFreq(x,np.size(frame[:,:,0],0)),0.3))
-            threads.append(t)
-            t.start()
+            if t2 is not None:
+                t2.updateFreq(locToFreq(x, np.size(frame[:, :, 0], 0)))
+            else:
+                t2 = StoppableThread(target=startContinuousTone, freq=locToFreq(x, np.size(frame[:, :, 0], 0)), stream=stream2)
+                t2.start()
+        else:
+            if t2 is not None:
+                t2.stop()
+                t2 = None
 
+        if foundReg3:
+            y,x = savedReg3.centroid
+            pts.append((x,y))
 
-
-
-
-
-        # if foundReg:
-        #     y,x = savedReg.centroid
-        #
-        #     # cv2.circle(mask,(int(x),int(y)),10,(0,0,255),-1)
-        #     #cv2.imshow('frame',frame)
-        #
-        #     cv2.imshow('diff',mask)
-        #
-        #     t = threading.Thread(target=genSound, args=(locToFreq(x,np.size(frame[:,:,0],0)),))
-        #     # for thread in threads:
-        #     #     thread.stop()
-        #     threads.append(t)
-        #
-        #     t.start()
+            if t3 is not None:
+                t3.updateFreq(locToFreq(x, np.size(frame[:, :, 0], 0)))
+            else:
+                t3 = StoppableThread(target=startContinuousTone, freq=locToFreq(x, np.size(frame[:, :, 0], 0)), stream=stream3)
+                t3.start()
+        else:
+            if t3 is not None:
+                t3.stop()
+                t3 = None
 
 
 
@@ -234,7 +278,13 @@ while(True):
 cap.release()
 cv2.destroyAllWindows()
 
-stream.close()
-p.terminate()
+stream1.close()
+p1.terminate()
+
+stream2.close()
+p2.terminate()
+
+stream3.close()
+p3.terminate()
 
 
